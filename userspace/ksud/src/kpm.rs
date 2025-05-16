@@ -4,16 +4,52 @@ use std::path::Path;
 use std::fs;
 use anyhow::anyhow;
 use std::ffi::OsStr;
+use std::process::Command;
 
 pub const KPM_DIR: &str = "/data/adb/kpm";
 pub const KPMMGR_PATH: &str = "/data/adb/ksu/bin/kpmmgr";
 
-// 确保 KPM 目录存在，如果不存在则创建
-pub fn ensure_kpm_dir() -> Result<()> {
-    if !Path::new(KPM_DIR).exists() {
-        fs::create_dir_all(KPM_DIR)?;
+// 检查KPM的版本
+fn check_kpmmgr_version() -> Result<bool> {
+    let output = Command::new(KPMMGR_PATH)
+        .arg("version")
+        .output()
+        .map_err(|e| anyhow!("Failed to execute kpmmgr version: {}", e))?;
+    
+    if !output.status.success() {
+        return Ok(false);
     }
-    Ok(())
+    
+    let version_output = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if !version_output.is_empty() && !version_output.starts_with("Error") {
+        log::info!("KPM version: {}", version_output);
+        Ok(true)
+    } else {
+        log::warn!("KPM version check failed: {}", version_output);
+        Ok(false)
+    }
+}
+
+// 创建确保 KPM 目录存在
+pub fn ensure_kpm_dir() -> Result<()> {
+    match check_kpmmgr_version() {
+        Ok(true) => {
+            if !Path::new(KPM_DIR).exists() {
+                fs::create_dir_all(KPM_DIR)?;
+                log::info!("KPM Catalog Created: {}", KPM_DIR);
+            }
+            Ok(())
+        },
+        Ok(false) => {
+            log::error!("KPM version check fails to create KPM directory");
+            Err(anyhow!("KPM version check failed"))
+        },
+        Err(e) => {
+            log::error!("Error checking KPM version: {}", e);
+            Err(e)
+        }
+    }
 }
 
 pub fn start_kpm_watcher() -> Result<()> {
